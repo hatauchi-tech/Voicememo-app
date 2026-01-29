@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Voice Transcribe</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- --- APP ICON & MANIFEST SETTINGS --- -->
+  <script>
+    // 1. Define the SVG Icon Source
+    const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="120" fill="#2563eb"/><path fill="white" d="M256 320c44.2 0 80-35.8 80-80V128c0-44.2-35.8-80-80-80s-80 35.8-80 80v112c0 44.2 35.8 80 80 80z"/><path fill="white" d="M416 240c0 88.4-71.6 160-160 160s-160-71.6-160-160h-32c0 99.6 74.8 181.8 171.1 190.8V480h41.8v-49.2C373.2 421.8 448 339.6 448 240h-32z"/></svg>`;
+
+    // 2. Dynamic Convert: SVG -> PNG (Required for iOS)
+    function setAppIcons() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      // Load SVG
+      img.src = "data:image/svg+xml;base64," + btoa(iconSvg);
+      
+      img.onload = function() {
+        // Draw SVG to Canvas to convert to PNG
+        ctx.drawImage(img, 0, 0);
+        const pngUrl = canvas.toDataURL('image/png');
+
+        // Helper to inject link tags
+        const addLink = (rel, href) => {
+          const link = document.createElement('link');
+          link.rel = rel;
+          link.href = href;
+          document.head.appendChild(link);
+        };
+
+        // Inject iOS Icon (Must be PNG)
+        addLink('apple-touch-icon', pngUrl);
+        
+        // Inject Standard Icon
+        addLink('icon', pngUrl);
+        
+        // Inject Manifest (For Android)
+        const manifest = {
+          "name": "AI Voice Transcription",
+          "short_name": "AI文字起こし",
+          "start_url": ".",
+          "display": "standalone",
+          "background_color": "#ffffff",
+          "theme_color": "#2563eb",
+          "icons": [{ "src": pngUrl, "sizes": "512x512", "type": "image/png" }]
+        };
+        const manifestUrl = "data:application/json;base64," + btoa(JSON.stringify(manifest));
+        addLink('manifest', manifestUrl);
+      };
+    }
+    
+    // Execute conversion immediately
+    setAppIcons();
+  </script>
+
+  <!-- iOS Static Settings -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AI文字起こし">
+
+  <style>
+    /* Custom Pulse Animation for Recording */
+    @keyframes pulse-red {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .recording-pulse {
+      animation: pulse-red 2s infinite;
+    }
+    /* Disable text selection for app-like feel */
+    body {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    input, select, textarea {
+      -webkit-user-select: auto;
+      user-select: auto;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans min-h-screen flex flex-col items-center justify-center p-4">
+
+  <div class="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+    <!-- Header -->
+    <div class="bg-blue-600 p-6 text-white text-center">
+      <h1 class="text-xl font-bold flex items-center justify-center gap-2">
+        <i data-lucide="mic-2"></i> 音声文字起こし
+      </h1>
+      <p class="text-blue-100 text-sm mt-1">Gemini AI x Google Docs</p>
+    </div>
+
+    <!-- Main Content -->
+    <div class="p-6 space-y-6">
+      
+      <!-- Status Message -->
+      <div id="statusMessage" class="hidden text-center text-sm p-2 rounded bg-gray-100 text-gray-600">
+        準備中...
+      </div>
+
+      <!-- Document Select -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">保存先ドキュメント</label>
+        <div class="relative">
+          <select id="docSelect" class="block w-full pl-3 pr-10 py-3 text-base border-gray-300 bg-gray-50 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-lg border">
+            <option value="" disabled selected>読み込み中...</option>
+          </select>
+          <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+            <i data-lucide="chevron-down" class="h-4 w-4"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex flex-col items-center justify-center py-4">
+        <button id="recordBtn" class="group relative w-20 h-20 rounded-full bg-red-500 hover:bg-red-600 transition-all duration-300 flex items-center justify-center shadow-lg focus:outline-none focus:ring-4 focus:ring-red-200">
+          <i data-lucide="mic" class="text-white w-8 h-8 group-hover:scale-110 transition-transform"></i>
+        </button>
+        <p id="timer" class="mt-4 text-2xl font-mono font-bold text-gray-700">00:00</p>
+        <p id="recordStatus" class="text-sm text-gray-500 mt-1">タップして録音開始</p>
+      </div>
+
+      <!-- NotebookLM Link -->
+      <a id="notebookLink" href="#" target="_blank" class="block w-full text-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+        NotebookLMを開く <i data-lucide="external-link" class="inline w-4 h-4 ml-1"></i>
+      </a>
+    </div>
+
+    <!-- Progress Overlay -->
+    <div id="progressOverlay" class="hidden absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+      <p class="text-gray-700 font-medium">送信中...</p>
+      <p id="progressText" class="text-sm text-gray-500 mt-1">0%</p>
+    </div>
+  </div>
+
+  <script>
+    lucide.createIcons();
+
+    let mediaRecorder;
+    let audioChunks = [];
+    let startTime;
+    let timerInterval;
+    let sessionId;
+    
+    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunk for upload
+    const UI = {
+      recordBtn: document.getElementById('recordBtn'),
+      timer: document.getElementById('timer'),
+      status: document.getElementById('recordStatus'),
+      docSelect: document.getElementById('docSelect'),
+      notebookLink: document.getElementById('notebookLink'),
+      overlay: document.getElementById('progressOverlay'),
+      progressText: document.getElementById('progressText'),
+      msg: document.getElementById('statusMessage')
+    };
+
+    // Initialization
+    window.onload = function() {
+      google.script.run.withSuccessHandler(data => {
+        UI.docSelect.innerHTML = '';
+        if (data.documents.length === 0) {
+           const opt = document.createElement('option');
+           opt.text = "設定エラー: ドキュメントが見つかりません";
+           UI.docSelect.add(opt);
+        } else {
+          data.documents.forEach((doc, idx) => {
+            const opt = document.createElement('option');
+            opt.value = doc.id;
+            opt.text = doc.name;
+            if (idx === 0) opt.selected = true;
+            UI.docSelect.add(opt);
+          });
+        }
+        UI.notebookLink.href = data.notebookLmUrl;
+      }).getUiData();
+    };
+
+    UI.recordBtn.addEventListener('click', toggleRecording);
+
+    async function toggleRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+
+    async function startRecording() {
+      if (!UI.docSelect.value) {
+        alert("ドキュメントを選択してください");
+        return;
+      }
+
+      try {
+        // iOS Safari Audio Context Fix
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        sessionId = 'session_' + Date.now();
+
+        mediaRecorder.ondataavailable = event => {
+          if (event.data.size > 0) audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = processRecording;
+
+        mediaRecorder.start();
+        
+        // UI Update
+        UI.recordBtn.classList.add('recording-pulse', 'bg-red-600');
+        UI.recordBtn.innerHTML = '<i data-lucide="square" class="text-white w-8 h-8 fill-current"></i>';
+        lucide.createIcons();
+        UI.status.innerText = "録音中...";
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 1000);
+
+      } catch (err) {
+        console.error(err);
+        alert("マイクへのアクセスが拒否されました。\nブラウザの設定を確認してください。");
+      }
+    }
+
+    function stopRecording() {
+      mediaRecorder.stop();
+      UI.recordBtn.classList.remove('recording-pulse', 'bg-red-600');
+      UI.recordBtn.classList.add('bg-red-500');
+      UI.recordBtn.innerHTML = '<i data-lucide="mic" class="text-white w-8 h-8"></i>';
+      lucide.createIcons();
+      clearInterval(timerInterval);
+      UI.status.innerText = "処理中...";
+    }
+
+    function updateTimer() {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+      const s = (elapsed % 60).toString().padStart(2, '0');
+      UI.timer.innerText = `${m}:${s}`;
+    }
+
+    async function processRecording() {
+      UI.overlay.classList.remove('hidden');
+      UI.progressText.innerText = "データの準備中...";
+
+      const blob = new Blob(audioChunks, { type: 'audio/mp3' }); // MIME type hint
+      const totalSize = blob.size;
+      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
+
+      // Upload in chunks
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const chunk = blob.slice(start, end);
+        
+        const base64 = await fileToBase64(chunk);
+        
+        // Remove header from base64 string
+        const base64Data = base64.split(',')[1];
+
+        await new Promise((resolve, reject) => {
+          UI.progressText.innerText = `送信中 (${i + 1}/${totalChunks})...`;
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .uploadChunk(base64Data, sessionId, i, blob.type);
+        });
+      }
+
+      // Finalize
+      UI.progressText.innerText = "仕上げ中...";
+      google.script.run
+        .withSuccessHandler(() => {
+          UI.overlay.classList.add('hidden');
+          UI.timer.innerText = "00:00";
+          UI.status.innerText = "タップして録音開始";
+          showToast("送信完了。バックグラウンドで処理します。");
+        })
+        .withFailureHandler((e) => {
+          UI.overlay.classList.add('hidden');
+          alert("エラーが発生しました: " + e.message);
+        })
+        .finalizeUpload(sessionId, UI.docSelect.value);
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+      });
+    }
+
+    function showToast(message) {
+      UI.msg.innerText = message;
+      UI.msg.classList.remove('hidden');
+      setTimeout(() => UI.msg.classList.add('hidden'), 5000);
+    }
+  </script>
+</body>
+</html>
